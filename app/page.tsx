@@ -89,6 +89,8 @@ export default function Home() {
   const [rounds, setRounds] = useState<Round[]>([]);
   const [swapA, setSwapA] = useState('');
   const [swapB, setSwapB] = useState('');
+  const [movePlayerId, setMovePlayerId] = useState('');
+  const [moveDestination, setMoveDestination] = useState('');
   const [manualDraft, setManualDraft] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
@@ -179,6 +181,27 @@ export default function Home() {
     setRounds((all) => [...all.slice(0, -1), { ...currentRound, pods: currentRound.pods.map((pod) => ({ ...pod, playerIds: pod.playerIds.map(replace), winnerId: undefined, isDraw: false })), byeIds: currentRound.byeIds.map(replace) }]);
     setSwapA(''); setSwapB('');
   }
+  function movePlayer() {
+    if (!movePlayerId || !moveDestination || !currentRound || currentRound.complete || currentRound.phase === 'final') return;
+    const sourcePod = currentRound.pods.find((pod) => pod.playerIds.includes(movePlayerId));
+    if (sourcePod?.id === moveDestination || (currentRound.byeIds.includes(movePlayerId) && moveDestination === 'bye')) return;
+    const destinationPod = currentRound.pods.find((pod) => pod.id === moveDestination);
+    if (destinationPod && destinationPod.playerIds.length >= 4) return;
+
+    let pods = currentRound.pods
+      .map((pod) => ({ ...pod, playerIds: pod.playerIds.filter((id) => id !== movePlayerId), winnerId: undefined, isDraw: false }))
+      .filter((pod) => pod.playerIds.length > 0);
+    let byeIds = currentRound.byeIds.filter((id) => id !== movePlayerId);
+    if (moveDestination === 'new') {
+      pods.push({ id: `r${currentRound.number}-manual-${Date.now()}`, playerIds: [movePlayerId] });
+    } else if (moveDestination === 'bye') {
+      byeIds.push(movePlayerId);
+    } else {
+      pods = pods.map((pod) => pod.id === moveDestination ? { ...pod, playerIds: [...pod.playerIds, movePlayerId] } : pod);
+    }
+    setRounds((all) => [...all.slice(0, -1), { ...currentRound, pods, byeIds }]);
+    setMovePlayerId(''); setMoveDestination('');
+  }
   function dropPlayer(id: string) {
     setPlayers((all) => all.map((player) => player.id === id ? { ...player, dropped: !player.dropped } : player));
     if (currentRound && !currentRound.complete && currentRound.phase === 'swiss') {
@@ -200,7 +223,19 @@ export default function Home() {
         </div></div>
         : championId ? <div className="panel champion-glow px-6 py-12 text-center"><div className="mx-auto grid size-20 place-items-center rounded-full bg-amber-300/20 text-amber-600"><Trophy className="size-10" /></div><p className="mt-6 text-xs font-bold uppercase tracking-[.24em] text-amber-600">Tournament champion</p><h1 className="mt-2 font-heading text-5xl font-black">{players.find((player) => player.id === championId)?.name}</h1><Button className="mt-8" variant="outline" onClick={() => { setPlayers([]); setRounds([]); }}><RotateCcw /> New tournament</Button></div>
         : currentRound ? <div><div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="eyebrow">{currentRound.phase === 'final' ? 'Top 4 cut' : manualDraft ? 'Manual pairing draft' : 'Live pairings'}</p><h1 className="font-heading text-3xl font-black">{currentRound.phase === 'final' ? 'Championship pod' : `Swiss Round ${currentRound.number}`}</h1><p className="mt-1 text-sm text-muted-foreground">{manualDraft ? 'Use the seat swapper to create the exact opening pods you want.' : 'Select one winner for every pod, then complete the round.'}</p></div><Button disabled={!canFinish} className="h-11 px-5" onClick={finishRound}><Sparkles /> {currentRound.phase === 'final' ? 'Crown champion' : currentRound.number === 4 ? 'Complete Swiss & cut' : 'Complete round'}</Button></div>
-          {currentRound.phase === 'swiss' && <div className="panel mb-4 flex flex-col gap-3 p-4 xl:flex-row xl:items-end"><div className="flex-1"><p className="eyebrow">Repair pairings</p><div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]"><NativeSelect className="w-full" value={swapA} onChange={(e) => setSwapA(e.target.value)}><NativeSelectOption value="">First player</NativeSelectOption>{availableToSwap.map((id) => <NativeSelectOption key={id} value={id}>{players.find((p) => p.id === id)?.name}</NativeSelectOption>)}</NativeSelect><NativeSelect className="w-full" value={swapB} onChange={(e) => setSwapB(e.target.value)}><NativeSelectOption value="">Second player</NativeSelectOption>{availableToSwap.map((id) => <NativeSelectOption key={id} value={id}>{players.find((p) => p.id === id)?.name}</NativeSelectOption>)}</NativeSelect><Button variant="outline" onClick={swapPlayers}><ArrowRightLeft /> Swap seats</Button></div></div><Button variant="destructive" onClick={discardPairings}><Scissors /> Discard & re-pair</Button></div>}
+          {currentRound.phase === 'swiss' && <div className="panel mb-4 space-y-4 p-4">
+            <div className="flex items-center justify-between gap-3"><div><p className="eyebrow">Repair pairings</p><p className="text-xs text-muted-foreground">Move anyone between pods, a bye, or a brand-new pod.</p></div><Button variant="destructive" onClick={discardPairings}><Scissors /> Discard & re-pair</Button></div>
+            <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+              <NativeSelect className="w-full" value={movePlayerId} onChange={(e) => setMovePlayerId(e.target.value)}><NativeSelectOption value="">Player to move</NativeSelectOption>{availableToSwap.map((id) => <NativeSelectOption key={id} value={id}>{players.find((p) => p.id === id)?.name}{currentRound.byeIds.includes(id) ? ' (bye)' : ''}</NativeSelectOption>)}</NativeSelect>
+              <NativeSelect className="w-full" value={moveDestination} onChange={(e) => setMoveDestination(e.target.value)}><NativeSelectOption value="">Destination</NativeSelectOption>{currentRound.pods.map((pod, index) => <NativeSelectOption key={pod.id} value={pod.id} disabled={pod.playerIds.length >= 4}>Pod {index + 1} · {pod.playerIds.length}/4{pod.playerIds.length >= 4 ? ' (full)' : ''}</NativeSelectOption>)}<NativeSelectOption value="bye">Bye group</NativeSelectOption><NativeSelectOption value="new">New pod</NativeSelectOption></NativeSelect>
+              <Button variant="outline" disabled={!movePlayerId || !moveDestination} onClick={movePlayer}><Plus /> Move player</Button>
+            </div>
+            <div className="grid gap-2 border-t border-border pt-4 sm:grid-cols-[1fr_1fr_auto]">
+              <NativeSelect className="w-full" value={swapA} onChange={(e) => setSwapA(e.target.value)}><NativeSelectOption value="">First player</NativeSelectOption>{availableToSwap.map((id) => <NativeSelectOption key={id} value={id}>{players.find((p) => p.id === id)?.name}</NativeSelectOption>)}</NativeSelect>
+              <NativeSelect className="w-full" value={swapB} onChange={(e) => setSwapB(e.target.value)}><NativeSelectOption value="">Second player</NativeSelectOption>{availableToSwap.map((id) => <NativeSelectOption key={id} value={id}>{players.find((p) => p.id === id)?.name}</NativeSelectOption>)}</NativeSelect>
+              <Button variant="outline" onClick={swapPlayers}><ArrowRightLeft /> Swap seats</Button>
+            </div>
+          </div>}
           {currentRound.byeIds.length > 0 && <div className="mb-4 rounded-xl border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"><strong>Byes:</strong> {currentRound.byeIds.map((id) => players.find((player) => player.id === id)?.name).join(', ')}</div>}
           <div className="grid gap-4 xl:grid-cols-2">{currentRound.pods.map((pod, podIndex) => <article key={pod.id} className="panel p-5">
             <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><Swords className="size-4 text-primary" /><h2 className="font-heading font-bold">{currentRound.phase === 'final' ? 'Final table' : `Pod ${podIndex + 1}`}</h2></div><Badge variant={pod.winnerId || pod.isDraw ? 'default' : 'outline'}>{pod.isDraw ? 'Draw · 1 point each' : pod.winnerId ? 'Winner selected' : `${pod.playerIds.length} players`}</Badge></div>
