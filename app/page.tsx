@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRightLeft, Crown, Dices, FileInput, Plus, RotateCcw, Scissors, Sparkles, Swords, Trophy, UserMinus, Users, X } from 'lucide-react';
+import { ArrowRightLeft, Crown, Dices, FileInput, Handshake, Plus, RotateCcw, Scissors, Sparkles, Swords, Trophy, UserMinus, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea';
 
 type Player = { id: string; name: string; dropped: boolean };
-type Pod = { id: string; playerIds: string[]; winnerId?: string };
+type Pod = { id: string; playerIds: string[]; winnerId?: string; isDraw?: boolean };
 type Round = { number: number; phase: 'swiss' | 'final'; pods: Pod[]; byeIds: string[]; complete: boolean };
 type Stats = { points: number; wins: number; byes: number; played: number; omw: number };
 
@@ -33,6 +33,7 @@ function calculateStats(players: Player[], rounds: Round[]): Record<string, Stat
         opponents[id].push(...pod.playerIds.filter((other) => other !== id));
       }
       if (pod.winnerId) { base[pod.winnerId].points += 3; base[pod.winnerId].wins += 1; }
+      if (pod.isDraw) pod.playerIds.forEach((id) => { base[id].points += 1; });
     }
   }
   const mwp = (id: string) => base[id].played ? Math.max(1 / 3, base[id].points / (base[id].played * 3)) : 1 / 3;
@@ -144,10 +145,14 @@ export default function Home() {
   }
   function setWinner(podId: string, playerId: string) {
     if (!currentRound || currentRound.complete) return;
-    setRounds((all) => all.map((round, index) => index === all.length - 1 ? { ...round, pods: round.pods.map((pod) => pod.id === podId ? { ...pod, winnerId: playerId } : pod) } : round));
+    setRounds((all) => all.map((round, index) => index === all.length - 1 ? { ...round, pods: round.pods.map((pod) => pod.id === podId ? { ...pod, winnerId: playerId, isDraw: false } : pod) } : round));
+  }
+  function setDraw(podId: string) {
+    if (!currentRound || currentRound.complete || currentRound.phase === 'final') return;
+    setRounds((all) => all.map((round, index) => index === all.length - 1 ? { ...round, pods: round.pods.map((pod) => pod.id === podId ? { ...pod, winnerId: undefined, isDraw: true } : pod) } : round));
   }
   function finishRound() {
-    if (!currentRound || currentRound.pods.some((pod) => !pod.winnerId)) return;
+    if (!currentRound || currentRound.pods.some((pod) => !pod.winnerId && !pod.isDraw)) return;
     const completed = { ...currentRound, complete: true };
     if (currentRound.phase === 'final') { setRounds([...rounds.slice(0, -1), completed]); return; }
     const completedRounds = [...rounds.slice(0, -1), completed];
@@ -171,16 +176,16 @@ export default function Home() {
   function swapPlayers() {
     if (!swapA || !swapB || swapA === swapB || !currentRound || currentRound.complete) return;
     const replace = (id: string) => id === swapA ? swapB : id === swapB ? swapA : id;
-    setRounds((all) => [...all.slice(0, -1), { ...currentRound, pods: currentRound.pods.map((pod) => ({ ...pod, playerIds: pod.playerIds.map(replace), winnerId: undefined })), byeIds: currentRound.byeIds.map(replace) }]);
+    setRounds((all) => [...all.slice(0, -1), { ...currentRound, pods: currentRound.pods.map((pod) => ({ ...pod, playerIds: pod.playerIds.map(replace), winnerId: undefined, isDraw: false })), byeIds: currentRound.byeIds.map(replace) }]);
     setSwapA(''); setSwapB('');
   }
   function dropPlayer(id: string) {
     setPlayers((all) => all.map((player) => player.id === id ? { ...player, dropped: !player.dropped } : player));
     if (currentRound && !currentRound.complete && currentRound.phase === 'swiss') {
-      setRounds((all) => [...all.slice(0, -1), { ...currentRound, pods: currentRound.pods.map((pod) => ({ ...pod, playerIds: pod.playerIds.filter((playerId) => playerId !== id), winnerId: pod.winnerId === id ? undefined : pod.winnerId })).filter((pod) => pod.playerIds.length), byeIds: currentRound.byeIds.filter((playerId) => playerId !== id) }]);
+      setRounds((all) => [...all.slice(0, -1), { ...currentRound, pods: currentRound.pods.map((pod) => ({ ...pod, playerIds: pod.playerIds.filter((playerId) => playerId !== id), winnerId: pod.winnerId === id ? undefined : pod.winnerId, isDraw: false })).filter((pod) => pod.playerIds.length), byeIds: currentRound.byeIds.filter((playerId) => playerId !== id) }]);
     }
   }
-  const canFinish = currentRound?.pods.every((pod) => pod.winnerId) && !currentRound.complete;
+  const canFinish = currentRound?.pods.every((pod) => pod.winnerId || pod.isDraw) && !currentRound.complete;
   const availableToSwap = currentRound ? [...currentRound.pods.flatMap((pod) => pod.playerIds), ...currentRound.byeIds] : [];
 
   return <main className="min-h-screen bg-background text-foreground">
@@ -197,11 +202,15 @@ export default function Home() {
         : currentRound ? <div><div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="eyebrow">{currentRound.phase === 'final' ? 'Top 4 cut' : manualDraft ? 'Manual pairing draft' : 'Live pairings'}</p><h1 className="font-heading text-3xl font-black">{currentRound.phase === 'final' ? 'Championship pod' : `Swiss Round ${currentRound.number}`}</h1><p className="mt-1 text-sm text-muted-foreground">{manualDraft ? 'Use the seat swapper to create the exact opening pods you want.' : 'Select one winner for every pod, then complete the round.'}</p></div><Button disabled={!canFinish} className="h-11 px-5" onClick={finishRound}><Sparkles /> {currentRound.phase === 'final' ? 'Crown champion' : currentRound.number === 4 ? 'Complete Swiss & cut' : 'Complete round'}</Button></div>
           {currentRound.phase === 'swiss' && <div className="panel mb-4 flex flex-col gap-3 p-4 xl:flex-row xl:items-end"><div className="flex-1"><p className="eyebrow">Repair pairings</p><div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]"><NativeSelect className="w-full" value={swapA} onChange={(e) => setSwapA(e.target.value)}><NativeSelectOption value="">First player</NativeSelectOption>{availableToSwap.map((id) => <NativeSelectOption key={id} value={id}>{players.find((p) => p.id === id)?.name}</NativeSelectOption>)}</NativeSelect><NativeSelect className="w-full" value={swapB} onChange={(e) => setSwapB(e.target.value)}><NativeSelectOption value="">Second player</NativeSelectOption>{availableToSwap.map((id) => <NativeSelectOption key={id} value={id}>{players.find((p) => p.id === id)?.name}</NativeSelectOption>)}</NativeSelect><Button variant="outline" onClick={swapPlayers}><ArrowRightLeft /> Swap seats</Button></div></div><Button variant="destructive" onClick={discardPairings}><Scissors /> Discard & re-pair</Button></div>}
           {currentRound.byeIds.length > 0 && <div className="mb-4 rounded-xl border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"><strong>Byes:</strong> {currentRound.byeIds.map((id) => players.find((player) => player.id === id)?.name).join(', ')}</div>}
-          <div className="grid gap-4 xl:grid-cols-2">{currentRound.pods.map((pod, podIndex) => <article key={pod.id} className="panel p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><Swords className="size-4 text-primary" /><h2 className="font-heading font-bold">{currentRound.phase === 'final' ? 'Final table' : `Pod ${podIndex + 1}`}</h2></div><Badge variant={pod.winnerId ? 'default' : 'outline'}>{pod.winnerId ? 'Winner selected' : `${pod.playerIds.length} players`}</Badge></div><div className="space-y-2">{pod.playerIds.map((id, seat) => { const player = players.find((entry) => entry.id === id)!; const selected = pod.winnerId === id; return <button key={id} onClick={() => setWinner(pod.id, id)} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${selected ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_var(--primary)]' : 'bg-white hover:border-primary/40'}`}><span className={`grid size-8 place-items-center rounded-lg font-mono text-xs font-bold ${selected ? 'bg-primary text-white' : 'bg-muted'}`}>{seat + 1}</span><span className="flex-1 text-sm font-semibold">{player.name}</span>{selected && <Crown className="size-4 text-primary" />}</button>; })}</div></article>)}</div>
+          <div className="grid gap-4 xl:grid-cols-2">{currentRound.pods.map((pod, podIndex) => <article key={pod.id} className="panel p-5">
+            <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><Swords className="size-4 text-primary" /><h2 className="font-heading font-bold">{currentRound.phase === 'final' ? 'Final table' : `Pod ${podIndex + 1}`}</h2></div><Badge variant={pod.winnerId || pod.isDraw ? 'default' : 'outline'}>{pod.isDraw ? 'Draw · 1 point each' : pod.winnerId ? 'Winner selected' : `${pod.playerIds.length} players`}</Badge></div>
+            <div className="space-y-2">{pod.playerIds.map((id, seat) => { const player = players.find((entry) => entry.id === id)!; const selected = pod.winnerId === id; return <button key={id} onClick={() => setWinner(pod.id, id)} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${selected ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_var(--primary)]' : pod.isDraw ? 'border-sky-200 bg-sky-50/60' : 'bg-white hover:border-primary/40'}`}><span className={`grid size-8 place-items-center rounded-lg font-mono text-xs font-bold ${selected ? 'bg-primary text-white' : 'bg-muted'}`}>{seat + 1}</span><span className="flex-1 text-sm font-semibold">{player.name}</span>{selected && <Crown className="size-4 text-primary" />}</button>; })}</div>
+            {currentRound.phase === 'swiss' && <Button variant={pod.isDraw ? 'secondary' : 'outline'} className="mt-3 w-full" onClick={() => setDraw(pod.id)}><Handshake /> {pod.isDraw ? 'Draw recorded' : 'Record pod draw'}</Button>}
+          </article>)}</div>
         </div> : null}
       </section>
       <aside className="space-y-4"><div className="panel p-5"><div className="flex items-center justify-between"><div><p className="eyebrow">Live table</p><h2 className="font-heading text-xl font-bold">Standings</h2></div><Trophy className="size-5 text-amber-500" /></div>{!started ? <p className="mt-5 rounded-xl bg-muted p-4 text-sm text-muted-foreground">Standings appear after the tournament begins.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-[10px] uppercase tracking-widest text-muted-foreground"><th className="pb-2 text-left"># Player</th><th className="pb-2 text-right">Pts</th><th className="pb-2 text-right">OMW%</th><th /></tr></thead><tbody>{standings.map((player, index) => <tr key={player.id} className={`border-b border-border/60 ${index < 4 ? 'bg-amber-50/70' : ''}`}><td className="py-2.5"><span className="mr-2 font-mono text-xs text-muted-foreground">{index + 1}</span><span className={player.dropped ? 'text-muted-foreground line-through' : 'font-semibold'}>{player.name}</span>{index < 4 && !player.dropped && <span className="ml-1 text-[9px] font-bold text-amber-700">CUT</span>}</td><td className="py-2.5 text-right font-bold">{stats[player.id].points}</td><td className="py-2.5 text-right font-mono text-xs">{(stats[player.id].omw * 100).toFixed(1)}</td><td className="py-2.5 pl-2 text-right"><button title={player.dropped ? 'Restore player' : 'Drop player'} onClick={() => dropPlayer(player.id)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"><UserMinus className="size-3.5" /></button></td></tr>)}</tbody></table></div>}</div>
-        {started && <div className="rounded-2xl bg-[#15231b] p-5 text-white"><p className="text-xs font-bold uppercase tracking-widest text-emerald-300">Pairing logic</p><p className="mt-2 text-sm leading-6 text-white/60">Players are grouped by match points, then OMW%. The engine avoids repeat opponents where possible. A win or bye is 3 points; OMW% uses each opponent’s match-win rate with a 33.3% floor.</p></div>}
+        {started && <div className="rounded-2xl bg-[#15231b] p-5 text-white"><p className="text-xs font-bold uppercase tracking-widest text-emerald-300">Pairing logic</p><p className="mt-2 text-sm leading-6 text-white/60">Players are grouped by match points, then OMW%. The engine avoids repeat opponents where possible. A win or bye is 3 points and a draw is 1 point per player; OMW% uses each opponent’s match-win rate with a 33.3% floor.</p></div>}
         {started && <Button variant="ghost" className="w-full text-muted-foreground" onClick={() => { setPlayers([]); setRounds([]); }}><RotateCcw /> Reset tournament</Button>}
       </aside>
     </div>
